@@ -1,0 +1,2 @@
+import db from "@/lib/db"; import {requireAuth} from "@/lib/auth/guard";
+export async function GET(){const{response}=await requireAuth();if(response)return response;try{const[data]=await db.execute(`SELECT product_id,product_name,SUM(quantity) quantity_sold,SUM(subtotal) total_sales FROM transaction_items GROUP BY product_id,product_name ORDER BY quantity_sold DESC`);return Response.json({success:true,data})}catch(e){return Response.json({success:false,message:"Gagal mengambil laporan produk"},{status:500})}}

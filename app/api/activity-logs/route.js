@@ -1,0 +1,2 @@
+import db from "@/lib/db"; import {requireRole} from "@/lib/auth/guard";
+export async function GET(){const{response}=await requireRole("admin");if(response)return response;try{const[data]=await db.execute(`SELECT al.id,al.user_id,u.name user_name,al.action,al.description,al.created_at FROM activity_logs al LEFT JOIN users u ON u.id=al.user_id ORDER BY al.created_at DESC LIMIT 200`);return Response.json({success:true,data})}catch(e){return Response.json({success:false,message:"Gagal mengambil activity log"},{status:500})}}
