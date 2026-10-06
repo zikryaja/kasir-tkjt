@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { jsPDF } from "jspdf";
 
 function rupiah(value) {
   return new Intl.NumberFormat("id-ID", {
@@ -26,6 +27,7 @@ export default function TransactionDetail() {
 
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     async function loadTransaction() {
@@ -73,12 +75,6 @@ export default function TransactionDetail() {
     );
   }
 
-  /*
-   * =========================================================
-   * DATA TRANSAKSI
-   * =========================================================
-   */
-
   const calculatedSubtotal = (data.items || []).reduce(
     (total, item) => {
       return (
@@ -115,500 +111,568 @@ export default function TransactionDetail() {
       ? "CASH"
       : "QRIS";
 
-  /*
-   * =========================================================
-   * PAGE
-   * =========================================================
-   */
+  // =========================================================
+  // DOWNLOAD STRUK PDF
+  // =========================================================
+
+  const downloadReceipt = () => {
+    try {
+      setDownloading(true);
+
+      const items = data.items || [];
+
+      /*
+       * Tinggi dasar struk.
+       * Lebar selalu 80mm.
+       */
+      let height = 82;
+
+      /*
+       * Tambahkan tinggi berdasarkan jumlah produk.
+       *
+       * Nama produk yang panjang bisa menjadi
+       * beberapa baris.
+       */
+      items.forEach((item) => {
+        const productName = String(
+          item.product_name || "-"
+        );
+
+        const nameLines = Math.max(
+          1,
+          Math.ceil(productName.length / 28)
+        );
+
+        height += 10 + nameLines * 4;
+      });
+
+      /*
+       * Tambahan:
+       * - subtotal
+       * - diskon
+       * - total
+       * - pembayaran
+       * - footer
+       */
+      height += 65;
+
+      /*
+       * PDF:
+       * width  = 80mm
+       * height = dinamis
+       */
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: [80, height],
+      });
+
+      const centerX = 40;
+      const left = 5;
+      const right = 75;
+
+      let y = 7;
+
+      // =====================================================
+      // HEADER
+      // =====================================================
+
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      pdf.setFontSize(14);
+
+      pdf.text(
+        "KASIR TKJT",
+        centerX,
+        y,
+        {
+          align: "center",
+        }
+      );
+
+      y += 5;
+
+      pdf.setFontSize(9);
+
+      pdf.text(
+        "SMK Citra Negara",
+        centerX,
+        y,
+        {
+          align: "center",
+        }
+      );
+
+      y += 4;
+
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      pdf.setFontSize(7);
+
+      pdf.text(
+        "Sistem Kasir Digital",
+        centerX,
+        y,
+        {
+          align: "center",
+        }
+      );
+
+      y += 6;
+
+      pdf.setLineWidth(0.25);
+
+      pdf.line(
+        left,
+        y,
+        right,
+        y
+      );
+
+      y += 5;
+
+      // =====================================================
+      // INFORMASI TRANSAKSI
+      // =====================================================
+
+      pdf.setFontSize(7);
+
+      const infoRow = (
+        label,
+        value
+      ) => {
+        pdf.setFont(
+          "helvetica",
+          "normal"
+        );
+
+        pdf.text(
+          label,
+          left,
+          y
+        );
+
+        pdf.text(
+          String(value || "-"),
+          right,
+          y,
+          {
+            align: "right",
+          }
+        );
+
+        y += 4;
+      };
+
+      infoRow(
+        "No. Transaksi",
+        data.invoice_number
+      );
+
+      infoRow(
+        "Tanggal",
+        formatDate(data.created_at)
+      );
+
+      infoRow(
+        "Kasir",
+        data.cashier_name || "-"
+      );
+
+      infoRow(
+        "Member",
+        data.member_name || "Umum"
+      );
+
+      y += 2;
+
+      pdf.line(
+        left,
+        y,
+        right,
+        y
+      );
+
+      y += 5;
+
+      // =====================================================
+      // PRODUK
+      // =====================================================
+
+      pdf.setFontSize(7);
+
+      items.forEach((item) => {
+        const productName = String(
+          item.product_name || "-"
+        );
+
+        /*
+         * Pecah nama produk kalau terlalu panjang.
+         */
+        const nameLines =
+          pdf.splitTextToSize(
+            productName,
+            70
+          );
+
+        pdf.setFont(
+          "helvetica",
+          "bold"
+        );
+
+        pdf.text(
+          nameLines,
+          left,
+          y
+        );
+
+        y +=
+          nameLines.length *
+          3.5;
+
+        pdf.setFont(
+          "helvetica",
+          "normal"
+        );
+
+        pdf.text(
+          `${item.quantity} x ${rupiah(
+            item.price
+          )}`,
+          left,
+          y
+        );
+
+        pdf.setFont(
+          "helvetica",
+          "bold"
+        );
+
+        pdf.text(
+          rupiah(item.subtotal),
+          right,
+          y,
+          {
+            align: "right",
+          }
+        );
+
+        y += 5;
+      });
+
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      pdf.line(
+        left,
+        y,
+        right,
+        y
+      );
+
+      y += 5;
+
+      // =====================================================
+      // RINGKASAN
+      // =====================================================
+
+      const summaryRow = (
+        label,
+        value,
+        bold = false
+      ) => {
+        pdf.setFont(
+          "helvetica",
+          bold
+            ? "bold"
+            : "normal"
+        );
+
+        pdf.text(
+          label,
+          left,
+          y
+        );
+
+        pdf.text(
+          value,
+          right,
+          y,
+          {
+            align: "right",
+          }
+        );
+
+        y += bold ? 5 : 4;
+      };
+
+      summaryRow(
+        "Subtotal",
+        rupiah(subtotal)
+      );
+
+      if (discount > 0) {
+        summaryRow(
+          "Diskon Member",
+          `- ${rupiah(discount)}`
+        );
+      }
+
+      summaryRow(
+        "TOTAL",
+        rupiah(total),
+        true
+      );
+
+      y += 2;
+
+      pdf.line(
+        left,
+        y,
+        right,
+        y
+      );
+
+      y += 5;
+
+      // =====================================================
+      // PEMBAYARAN
+      // =====================================================
+
+      summaryRow(
+        "Pembayaran",
+        paymentMethod
+      );
+
+      if (
+        data.payment_method ===
+        "cash"
+      ) {
+        summaryRow(
+          "Uang diterima",
+          rupiah(paymentAmount)
+        );
+
+        summaryRow(
+          "Kembalian",
+          rupiah(changeAmount)
+        );
+      }
+
+      y += 2;
+
+      pdf.line(
+        left,
+        y,
+        right,
+        y
+      );
+
+      y += 6;
+
+      // =====================================================
+      // FOOTER
+      // =====================================================
+
+      pdf.setFont(
+        "helvetica",
+        "bold"
+      );
+
+      pdf.setFontSize(8);
+
+      pdf.text(
+        "Terima kasih!",
+        centerX,
+        y,
+        {
+          align: "center",
+        }
+      );
+
+      y += 4;
+
+      pdf.setFont(
+        "helvetica",
+        "normal"
+      );
+
+      pdf.setFontSize(7);
+
+      pdf.text(
+        "Selamat berbelanja kembali.",
+        centerX,
+        y,
+        {
+          align: "center",
+        }
+      );
+
+      y += 5;
+
+      pdf.setFontSize(6);
+
+      pdf.text(
+        "KASIR TKJT · SMK Citra Negara",
+        centerX,
+        y,
+        {
+          align: "center",
+        }
+      );
+
+      // =====================================================
+      // DOWNLOAD
+      // =====================================================
+
+      pdf.save(
+        `${data.invoice_number}.pdf`
+      );
+    } catch (error) {
+      console.error(
+        "Gagal membuat PDF:",
+        error
+      );
+
+      alert(
+        "Gagal membuat struk PDF."
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
-    <>
-      {/* =====================================================
-          PRINT CSS
-      ====================================================== */}
-
-      <style jsx global>{`
-        /*
-         * Normalnya struk tidak terlihat.
-         */
-        .receipt-print {
-          display: none;
-        }
-
-        /*
-         * Ukuran kertas thermal.
-         *
-         * Lebar 80mm.
-         * Tinggi dibiarkan mengikuti isi.
-         */
-        @page {
-          size: 80mm auto;
-          margin: 0;
-        }
-
-        @media print {
-          /*
-           * Halaman browser tetap menggunakan area 80mm.
-           */
-          html,
-          body {
-            width: 80mm !important;
-            min-width: 80mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: #ffffff !important;
-          }
-
-          /*
-           * Sembunyikan tampilan website
-           * tanpa menggunakan display:none.
-           */
-          body * {
-            visibility: hidden !important;
-          }
-
-          /*
-           * Tampilkan struk dan seluruh isinya.
-           */
-          .receipt-print,
-          .receipt-print * {
-            visibility: visible !important;
-          }
-
-          /*
-           * Struk menjadi satu-satunya area yang dicetak.
-           */
-          .receipt-print {
-            display: block !important;
-
-            position: absolute !important;
-
-            left: 0 !important;
-            top: 0 !important;
-
-            width: 80mm !important;
-
-            height: auto !important;
-            min-height: 0 !important;
-
-            margin: 0 !important;
-
-            padding: 4mm !important;
-
-            box-sizing: border-box !important;
-
-            background: #ffffff !important;
-            color: #000000 !important;
-
-            font-family:
-              Arial,
-              Helvetica,
-              sans-serif !important;
-
-            font-size: 10px !important;
-            line-height: 1.35 !important;
-          }
-
-          .receipt-print * {
-            color: #000000 !important;
-            box-sizing: border-box !important;
-          }
-        }
-      `}</style>
+    <div className="mx-auto max-w-3xl">
 
       {/* =====================================================
-          TAMPILAN TRANSAKSI NORMAL
+          HEADER
       ====================================================== */}
 
-      <div className="mx-auto max-w-3xl">
-        {/* Header */}
+      <div className="mb-5 flex items-center justify-between gap-4">
 
-        <div className="mb-5 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm text-muted">
-              Transaksi berhasil
-            </p>
+        <div>
+          <p className="text-sm text-muted">
+            Transaksi berhasil
+          </p>
 
-            <h1 className="mt-1 text-2xl font-semibold">
-              {data.invoice_number}
-            </h1>
-          </div>
-
-          <Link
-            href="/petugas/kasir"
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"
-          >
-            Transaksi Baru
-          </Link>
+          <h1 className="mt-1 text-2xl font-semibold">
+            {data.invoice_number}
+          </h1>
         </div>
 
-        {/* Transaction Card */}
+        <Link
+          href="/petugas/kasir"
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white"
+        >
+          Transaksi Baru
+        </Link>
 
-        <div className="rounded-xl border border-line bg-surface p-6">
-          {/* Informasi */}
-
-          <div className="border-b border-dashed border-line pb-4">
-            <div className="flex justify-between gap-4 text-sm">
-              <span className="text-muted">
-                Kasir
-              </span>
-
-              <span className="text-right">
-                {data.cashier_name || "-"}
-              </span>
-            </div>
-
-            <div className="mt-2 flex justify-between gap-4 text-sm">
-              <span className="text-muted">
-                Member
-              </span>
-
-              <span className="text-right">
-                {data.member_name || "Umum"}
-              </span>
-            </div>
-
-            <div className="mt-2 flex justify-between gap-4 text-sm">
-              <span className="text-muted">
-                Pembayaran
-              </span>
-
-              <span className="text-right">
-                {paymentMethod}
-              </span>
-            </div>
-          </div>
-
-          {/* Items */}
-
-          <div className="divide-y divide-line">
-            {(data.items || []).map(
-              (item, index) => (
-                <div
-                  key={index}
-                  className="flex justify-between gap-4 py-4"
-                >
-                  <div className="min-w-0">
-                    <p className="font-medium">
-                      {item.product_name}
-                    </p>
-
-                    <p className="text-sm text-muted">
-                      {item.quantity} ×{" "}
-                      {rupiah(item.price)}
-                    </p>
-                  </div>
-
-                  <p className="shrink-0 font-semibold">
-                    {rupiah(item.subtotal)}
-                  </p>
-                </div>
-              )
-            )}
-          </div>
-
-          {/* Ringkasan */}
-
-          <div className="border-t border-line pt-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-muted">
-                Subtotal
-              </span>
-
-              <span>
-                {rupiah(subtotal)}
-              </span>
-            </div>
-
-            {discount > 0 && (
-              <div className="mt-2 flex justify-between text-sm text-success">
-                <span>
-                  Diskon Member
-                </span>
-
-                <span>
-                  - {rupiah(discount)}
-                </span>
-              </div>
-            )}
-
-            <div className="mt-3 flex justify-between">
-              <span className="text-muted">
-                Total
-              </span>
-
-              <span className="text-xl font-bold">
-                {rupiah(total)}
-              </span>
-            </div>
-
-            {data.payment_method === "cash" && (
-              <>
-                <div className="mt-2 flex justify-between text-sm">
-                  <span className="text-muted">
-                    Uang diterima
-                  </span>
-
-                  <span>
-                    {rupiah(paymentAmount)}
-                  </span>
-                </div>
-
-                <div className="mt-2 flex justify-between text-sm">
-                  <span className="text-muted">
-                    Kembalian
-                  </span>
-
-                  <span>
-                    {rupiah(changeAmount)}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Tombol */}
-
-          <div className="mt-6 flex gap-2">
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="flex-1 rounded-lg border border-line px-4 py-3 text-sm font-semibold transition hover:bg-canvas"
-            >
-              Cetak Struk
-            </button>
-
-            <Link
-              href="/petugas/transaksi"
-              className="flex-1 rounded-lg border border-line px-4 py-3 text-center text-sm font-semibold"
-            >
-              Riwayat
-            </Link>
-          </div>
-        </div>
       </div>
 
       {/* =====================================================
-          STRUK THERMAL 80MM
+          TRANSACTION CARD
       ====================================================== */}
 
-      <div className="receipt-print">
+      <div className="rounded-xl border border-line bg-surface p-6">
 
-        {/* HEADER */}
+        {/* Informasi */}
 
-        <div
-          style={{
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              fontSize: "17px",
-              fontWeight: "700",
-              lineHeight: "20px",
-            }}
-          >
-            KASIR TKJT
-          </div>
+        <div className="border-b border-dashed border-line pb-4">
 
-          <div
-            style={{
-              marginTop: "2px",
-              fontSize: "11px",
-              fontWeight: "700",
-            }}
-          >
-            SMK Citra Negara
-          </div>
-
-          <div
-            style={{
-              marginTop: "2px",
-              fontSize: "9px",
-            }}
-          >
-            Sistem Kasir Digital
-          </div>
-        </div>
-
-        {/* GARIS */}
-
-        <div
-          style={{
-            borderTop: "1px dashed #000",
-            margin: "10px 0",
-          }}
-        />
-
-        {/* INFO TRANSAKSI */}
-
-        <div
-          style={{
-            fontSize: "10px",
-            lineHeight: "15px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "8px",
-            }}
-          >
-            <span>No. Transaksi</span>
-
-            <span
-              style={{
-                fontWeight: "700",
-                textAlign: "right",
-              }}
-            >
-              {data.invoice_number}
+          <div className="flex justify-between gap-4 text-sm">
+            <span className="text-muted">
+              Kasir
             </span>
-          </div>
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "8px",
-            }}
-          >
-            <span>Tanggal</span>
-
-            <span>
-              {formatDate(data.created_at)}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "8px",
-            }}
-          >
-            <span>Kasir</span>
-
-            <span>
+            <span className="text-right">
               {data.cashier_name || "-"}
             </span>
           </div>
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              gap: "8px",
-            }}
-          >
-            <span>Member</span>
+          <div className="mt-2 flex justify-between gap-4 text-sm">
+            <span className="text-muted">
+              Member
+            </span>
 
-            <span>
+            <span className="text-right">
               {data.member_name || "Umum"}
             </span>
           </div>
+
+          <div className="mt-2 flex justify-between gap-4 text-sm">
+            <span className="text-muted">
+              Pembayaran
+            </span>
+
+            <span className="text-right">
+              {paymentMethod}
+            </span>
+          </div>
+
         </div>
 
-        {/* GARIS */}
+        {/* Items */}
 
-        <div
-          style={{
-            borderTop: "1px dashed #000",
-            margin: "10px 0",
-          }}
-        />
+        <div className="divide-y divide-line">
 
-        {/* PRODUK */}
-
-        <div
-          style={{
-            fontSize: "10px",
-          }}
-        >
           {(data.items || []).map(
             (item, index) => (
               <div
                 key={index}
-                style={{
-                  marginBottom: "7px",
-                }}
+                className="flex justify-between gap-4 py-4"
               >
-                <div
-                  style={{
-                    fontWeight: "700",
-                    lineHeight: "14px",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {item.product_name}
-                </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    gap: "8px",
-                    lineHeight: "14px",
-                  }}
-                >
-                  <span>
+                <div className="min-w-0">
+
+                  <p className="font-medium">
+                    {item.product_name}
+                  </p>
+
+                  <p className="text-sm text-muted">
                     {item.quantity} ×{" "}
                     {rupiah(item.price)}
-                  </span>
+                  </p>
 
-                  <span
-                    style={{
-                      fontWeight: "700",
-                    }}
-                  >
-                    {rupiah(item.subtotal)}
-                  </span>
                 </div>
+
+                <p className="shrink-0 font-semibold">
+                  {rupiah(item.subtotal)}
+                </p>
+
               </div>
             )
           )}
+
         </div>
 
-        {/* GARIS */}
+        {/* Ringkasan */}
 
-        <div
-          style={{
-            borderTop: "1px dashed #000",
-            margin: "10px 0",
-          }}
-        />
+        <div className="border-t border-line pt-4">
 
-        {/* RINGKASAN */}
+          <div className="flex justify-between text-sm">
 
-        <div
-          style={{
-            fontSize: "10px",
-            lineHeight: "16px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-            }}
-          >
-            <span>
+            <span className="text-muted">
               Subtotal
             </span>
 
             <span>
               {rupiah(subtotal)}
             </span>
+
           </div>
 
           {discount > 0 && (
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-              }}
-            >
+            <div className="mt-2 flex justify-between text-sm text-success">
+
               <span>
                 Diskon Member
               </span>
@@ -616,144 +680,84 @@ export default function TransactionDetail() {
               <span>
                 - {rupiah(discount)}
               </span>
+
             </div>
           )}
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              marginTop: "4px",
-              fontSize: "13px",
-              fontWeight: "700",
-            }}
-          >
-            <span>
-              TOTAL
+          <div className="mt-3 flex justify-between">
+
+            <span className="text-muted">
+              Total
             </span>
 
-            <span>
+            <span className="text-xl font-bold">
               {rupiah(total)}
             </span>
-          </div>
-        </div>
 
-        {/* GARIS */}
-
-        <div
-          style={{
-            borderTop: "1px dashed #000",
-            margin: "10px 0",
-          }}
-        />
-
-        {/* PEMBAYARAN */}
-
-        <div
-          style={{
-            fontSize: "10px",
-            lineHeight: "16px",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-            }}
-          >
-            <span>
-              Pembayaran
-            </span>
-
-            <span
-              style={{
-                fontWeight: "700",
-              }}
-            >
-              {paymentMethod}
-            </span>
           </div>
 
-          {data.payment_method === "cash" && (
+          {data.payment_method ===
+            "cash" && (
             <>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                }}
-              >
-                <span>
+              <div className="mt-2 flex justify-between text-sm">
+
+                <span className="text-muted">
                   Uang diterima
                 </span>
 
                 <span>
-                  {rupiah(paymentAmount)}
+                  {rupiah(
+                    paymentAmount
+                  )}
                 </span>
+
               </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                }}
-              >
-                <span>
+              <div className="mt-2 flex justify-between text-sm">
+
+                <span className="text-muted">
                   Kembalian
                 </span>
 
                 <span>
-                  {rupiah(changeAmount)}
+                  {rupiah(
+                    changeAmount
+                  )}
                 </span>
+
               </div>
             </>
           )}
+
         </div>
 
-        {/* GARIS */}
+        {/* ===================================================
+            BUTTONS
+        ==================================================== */}
 
-        <div
-          style={{
-            borderTop: "1px dashed #000",
-            margin: "10px 0",
-          }}
-        />
+        <div className="mt-6 flex gap-2">
 
-        {/* FOOTER */}
-
-        <div
-          style={{
-            textAlign: "center",
-            fontSize: "10px",
-            lineHeight: "15px",
-          }}
-        >
-          <div
-            style={{
-              fontWeight: "700",
-            }}
+          <button
+            type="button"
+            onClick={downloadReceipt}
+            disabled={downloading}
+            className="flex-1 rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Terima kasih!
-          </div>
+            {downloading
+              ? "Membuat PDF..."
+              : "Unduh Struk PDF"}
+          </button>
 
-          <div
-            style={{
-              marginTop: "2px",
-            }}
+          <Link
+            href="/petugas/transaksi"
+            className="flex-1 rounded-lg border border-line px-4 py-3 text-center text-sm font-semibold transition hover:bg-canvas"
           >
-            Selamat berbelanja kembali.
-          </div>
+            Riwayat
+          </Link>
 
-          <div
-            style={{
-              marginTop: "7px",
-              fontSize: "8px",
-            }}
-          >
-            KASIR TKJT · SMK Citra Negara
-          </div>
         </div>
 
       </div>
-    </>
+    </div>
   );
 }
