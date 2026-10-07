@@ -1,17 +1,15 @@
 import db from "@/lib/db";
 import { requireAuth, requireRole } from "@/lib/auth/guard";
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
-import crypto from "crypto";
+import cloudinary from "@/lib/cloudinary";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 const ALLOWED_TYPES = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
+  "image/jpeg": true,
+  "image/png": true,
 };
 
-async function saveProductImage(file) {
+async function uploadProductImage(file) {
   if (!file || file.size === 0) {
     return null;
   }
@@ -24,29 +22,27 @@ async function saveProductImage(file) {
     throw new Error("Ukuran gambar maksimal 5 MB.");
   }
 
-  const uploadDir = path.join(
-    process.cwd(),
-    "public",
-    "uploads",
-    "products"
-  );
-
-  await mkdir(uploadDir, {
-    recursive: true,
-  });
-
-  const extension = ALLOWED_TYPES[file.type];
-
-  const filename =
-    `${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extension}`;
-
-  const filepath = path.join(uploadDir, filename);
-
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  await writeFile(filepath, buffer);
+  const result = await new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: "kasir-tkjt/products",
+        resource_type: "image",
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve(result);
+        }
+      }
+    );
 
-  return `/uploads/products/${filename}`;
+    uploadStream.end(buffer);
+  });
+
+  return result.secure_url;
 }
 
 export async function GET() {
@@ -136,7 +132,7 @@ export async function POST(request) {
       const image = formData.get("photo");
 
       if (image instanceof File && image.size > 0) {
-        photo = await saveProductImage(image);
+        photo = await uploadProductImage(image);
       }
     } else {
       const body = await request.json();

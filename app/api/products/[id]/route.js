@@ -1,17 +1,20 @@
 import db from "@/lib/db";
 import { requireRole } from "@/lib/auth/guard";
-import { mkdir, writeFile } from "fs/promises";
-import path from "path";
-import crypto from "crypto";
+import cloudinary from "@/lib/cloudinary";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 const ALLOWED_TYPES = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
+  "image/jpeg": true,
+  "image/png": true,
 };
 
-async function saveProductImage(file) {
+/*
+|--------------------------------------------------------------------------
+| UPLOAD PRODUCT IMAGE TO CLOUDINARY
+|--------------------------------------------------------------------------
+*/
+async function uploadProductImage(file) {
   if (!file || file.size === 0) {
     return null;
   }
@@ -23,41 +26,44 @@ async function saveProductImage(file) {
   }
 
   if (file.size > MAX_FILE_SIZE) {
-    throw new Error("Ukuran gambar maksimal 5 MB.");
+    throw new Error(
+      "Ukuran gambar maksimal 5 MB."
+    );
   }
-
-  const uploadDir = path.join(
-    process.cwd(),
-    "public",
-    "uploads",
-    "products"
-  );
-
-  await mkdir(uploadDir, {
-    recursive: true,
-  });
-
-  const extension = ALLOWED_TYPES[file.type];
-
-  const filename =
-    `${Date.now()}-${crypto
-      .randomBytes(8)
-      .toString("hex")}${extension}`;
-
-  const filepath = path.join(
-    uploadDir,
-    filename
-  );
 
   const buffer = Buffer.from(
     await file.arrayBuffer()
   );
 
-  await writeFile(filepath, buffer);
+  const result = await new Promise(
+    (resolve, reject) => {
+      const uploadStream =
+        cloudinary.uploader.upload_stream(
+          {
+            folder: "kasir-tkjt/products",
+            resource_type: "image",
+          },
+          (error, result) => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve(result);
+            }
+          }
+        );
 
-  return `/uploads/products/${filename}`;
+      uploadStream.end(buffer);
+    }
+  );
+
+  return result.secure_url;
 }
 
+/*
+|--------------------------------------------------------------------------
+| GET PRODUCT BY ID
+|--------------------------------------------------------------------------
+*/
 export async function GET(request, { params }) {
   const { response } = await requireRole("admin");
 
@@ -106,7 +112,10 @@ export async function GET(request, { params }) {
       data: rows[0],
     });
   } catch (error) {
-    console.error("Get product error:", error);
+    console.error(
+      "Get product error:",
+      error
+    );
 
     return Response.json(
       {
@@ -118,6 +127,11 @@ export async function GET(request, { params }) {
   }
 }
 
+/*
+|--------------------------------------------------------------------------
+| UPDATE PRODUCT
+|--------------------------------------------------------------------------
+*/
 export async function PUT(request, { params }) {
   const { response } = await requireRole("admin");
 
@@ -126,11 +140,24 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
 
+    /*
+    |--------------------------------------------------------------------------
+    | GET EXISTING PRODUCT
+    |--------------------------------------------------------------------------
+    */
     const [existingRows] = await db.execute(
       `
       SELECT
         id,
-        photo
+        sku,
+        name,
+        category_id,
+        description,
+        price,
+        stock,
+        minimum_stock,
+        photo,
+        status
       FROM products
       WHERE id = ?
       LIMIT 1
@@ -148,11 +175,14 @@ export async function PUT(request, { params }) {
       );
     }
 
-    const existingProduct = existingRows[0];
+    const existingProduct =
+      existingRows[0];
 
-    const contentType =
-      request.headers.get("content-type") || "";
-
+    /*
+    |--------------------------------------------------------------------------
+    | VARIABLES
+    |--------------------------------------------------------------------------
+    */
     let sku;
     let name;
     let category_id;
@@ -163,58 +193,91 @@ export async function PUT(request, { params }) {
     let status;
     let photo = existingProduct.photo;
 
+    const contentType =
+      request.headers.get("content-type") || "";
+
     /*
-     * =====================================================
-     * FORM DATA
-     * =====================================================
-     */
-    if (contentType.includes("multipart/form-data")) {
-      const formData = await request.formData();
+    |--------------------------------------------------------------------------
+    | MULTIPART FORM DATA
+    |--------------------------------------------------------------------------
+    */
+    if (
+      contentType.includes(
+        "multipart/form-data"
+      )
+    ) {
+      const formData =
+        await request.formData();
 
       sku = formData.get("sku");
       name = formData.get("name");
-      category_id = formData.get("category_id");
-      description = formData.get("description");
+      category_id =
+        formData.get("category_id");
+      description =
+        formData.get("description");
       price = formData.get("price");
       stock = formData.get("stock");
-      minimum_stock = formData.get("minimum_stock");
+      minimum_stock =
+        formData.get("minimum_stock");
       status = formData.get("status");
 
-      const image = formData.get("photo");
+      /*
+      |--------------------------------------------------------------------------
+      | NEW PRODUCT IMAGE
+      |--------------------------------------------------------------------------
+      */
+      const image =
+        formData.get("photo");
 
-      if (image instanceof File && image.size > 0) {
-        photo = await saveProductImage(image);
+      if (
+        image instanceof File &&
+        image.size > 0
+      ) {
+        photo =
+          await uploadProductImage(
+            image
+          );
       }
     }
 
     /*
-     * =====================================================
-     * JSON
-     * =====================================================
-     */
+    |--------------------------------------------------------------------------
+    | JSON REQUEST
+    |--------------------------------------------------------------------------
+    */
     else {
-      const body = await request.json();
+      const body =
+        await request.json();
 
       sku = body.sku;
       name = body.name;
-      category_id = body.category_id;
-      description = body.description;
+      category_id =
+        body.category_id;
+      description =
+        body.description;
       price = body.price;
       stock = body.stock;
-      minimum_stock = body.minimum_stock;
+      minimum_stock =
+        body.minimum_stock;
       status = body.status;
 
-      if (body.photo !== undefined) {
+      /*
+      |--------------------------------------------------------------------------
+      | PRESERVE / UPDATE PHOTO URL
+      |--------------------------------------------------------------------------
+      */
+      if (
+        body.photo !== undefined
+      ) {
         photo = body.photo;
       }
     }
 
     /*
-     * =====================================================
-     * STATUS ONLY
-     * =====================================================
-     */
-
+    |--------------------------------------------------------------------------
+    | STATUS ONLY UPDATE
+    |--------------------------------------------------------------------------
+    */
     const isStatusOnly =
       status !== undefined &&
       sku === undefined &&
@@ -233,7 +296,8 @@ export async function PUT(request, { params }) {
         return Response.json(
           {
             success: false,
-            message: "Status produk tidak valid.",
+            message:
+              "Status produk tidak valid.",
           },
           { status: 400 }
         );
@@ -258,16 +322,61 @@ export async function PUT(request, { params }) {
     }
 
     /*
-     * =====================================================
-     * VALIDASI
-     * =====================================================
-     */
+    |--------------------------------------------------------------------------
+    | FALLBACK EXISTING VALUES
+    |--------------------------------------------------------------------------
+    */
+    if (sku === undefined) {
+      sku = existingProduct.sku;
+    }
 
-    if (!name || !String(name).trim()) {
+    if (name === undefined) {
+      name = existingProduct.name;
+    }
+
+    if (category_id === undefined) {
+      category_id =
+        existingProduct.category_id;
+    }
+
+    if (description === undefined) {
+      description =
+        existingProduct.description;
+    }
+
+    if (price === undefined) {
+      price = existingProduct.price;
+    }
+
+    if (stock === undefined) {
+      stock = existingProduct.stock;
+    }
+
+    if (
+      minimum_stock === undefined
+    ) {
+      minimum_stock =
+        existingProduct.minimum_stock;
+    }
+
+    if (status === undefined) {
+      status = existingProduct.status;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDATION
+    |--------------------------------------------------------------------------
+    */
+    if (
+      !name ||
+      !String(name).trim()
+    ) {
       return Response.json(
         {
           success: false,
-          message: "Nama produk wajib diisi.",
+          message:
+            "Nama produk wajib diisi.",
         },
         { status: 400 }
       );
@@ -277,7 +386,8 @@ export async function PUT(request, { params }) {
       return Response.json(
         {
           success: false,
-          message: "Kategori produk wajib dipilih.",
+          message:
+            "Kategori produk wajib dipilih.",
         },
         { status: 400 }
       );
@@ -287,7 +397,8 @@ export async function PUT(request, { params }) {
       return Response.json(
         {
           success: false,
-          message: "Harga tidak boleh negatif.",
+          message:
+            "Harga tidak boleh negatif.",
         },
         { status: 400 }
       );
@@ -297,88 +408,97 @@ export async function PUT(request, { params }) {
       return Response.json(
         {
           success: false,
-          message: "Stok tidak boleh negatif.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (Number(minimum_stock || 0) < 0) {
-      return Response.json(
-        {
-          success: false,
-          message: "Minimum stok tidak boleh negatif.",
+          message:
+            "Stok tidak boleh negatif.",
         },
         { status: 400 }
       );
     }
 
     if (
-      status !== undefined &&
+      Number(minimum_stock || 0) < 0
+    ) {
+      return Response.json(
+        {
+          success: false,
+          message:
+            "Minimum stok tidak boleh negatif.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
       status !== "active" &&
       status !== "inactive"
     ) {
       return Response.json(
         {
           success: false,
-          message: "Status produk tidak valid.",
+          message:
+            "Status produk tidak valid.",
         },
         { status: 400 }
       );
     }
 
     /*
-     * =====================================================
-     * CEK KATEGORI
-     * =====================================================
-     */
-
-    const [categoryRows] = await db.execute(
-      `
-      SELECT id
-      FROM categories
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [Number(category_id)]
-    );
+    |--------------------------------------------------------------------------
+    | CHECK CATEGORY
+    |--------------------------------------------------------------------------
+    */
+    const [categoryRows] =
+      await db.execute(
+        `
+        SELECT id
+        FROM categories
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [Number(category_id)]
+      );
 
     if (categoryRows.length === 0) {
       return Response.json(
         {
           success: false,
-          message: "Kategori tidak ditemukan.",
+          message:
+            "Kategori tidak ditemukan.",
         },
         { status: 400 }
       );
     }
 
     /*
-     * =====================================================
-     * CEK SKU
-     * =====================================================
-     */
-
-    if (sku && String(sku).trim()) {
-      const [skuRows] = await db.execute(
-        `
-        SELECT id
-        FROM products
-        WHERE sku = ?
-          AND id != ?
-        LIMIT 1
-        `,
-        [
-          String(sku).trim(),
-          id,
-        ]
-      );
+    |--------------------------------------------------------------------------
+    | CHECK SKU
+    |--------------------------------------------------------------------------
+    */
+    if (
+      sku &&
+      String(sku).trim()
+    ) {
+      const [skuRows] =
+        await db.execute(
+          `
+          SELECT id
+          FROM products
+          WHERE sku = ?
+            AND id != ?
+          LIMIT 1
+          `,
+          [
+            String(sku).trim(),
+            id,
+          ]
+        );
 
       if (skuRows.length > 0) {
         return Response.json(
           {
             success: false,
-            message: "SKU sudah digunakan produk lain.",
+            message:
+              "SKU sudah digunakan produk lain.",
           },
           { status: 409 }
         );
@@ -386,11 +506,10 @@ export async function PUT(request, { params }) {
     }
 
     /*
-     * =====================================================
-     * UPDATE
-     * =====================================================
-     */
-
+    |--------------------------------------------------------------------------
+    | UPDATE DATABASE
+    |--------------------------------------------------------------------------
+    */
     await db.execute(
       `
       UPDATE products
@@ -403,35 +522,55 @@ export async function PUT(request, { params }) {
         stock = ?,
         minimum_stock = ?,
         photo = ?,
-        status = COALESCE(?, status)
+        status = ?
       WHERE id = ?
       `,
       [
-        sku ? String(sku).trim() : null,
+        sku
+          ? String(sku).trim()
+          : null,
+
         String(name).trim(),
+
         Number(category_id),
+
         description
           ? String(description).trim()
           : null,
+
         Number(price || 0),
+
         Number(stock || 0),
+
         Number(minimum_stock || 0),
-        photo,
-        status ?? null,
+
+        photo || null,
+
+        status,
+
         id,
       ]
     );
 
+    /*
+    |--------------------------------------------------------------------------
+    | RESPONSE
+    |--------------------------------------------------------------------------
+    */
     return Response.json({
       success: true,
-      message: "Produk berhasil diperbarui.",
+      message:
+        "Produk berhasil diperbarui.",
       data: {
         id: Number(id),
         photo,
       },
     });
   } catch (error) {
-    console.error("Update product error:", error);
+    console.error(
+      "Update product error:",
+      error
+    );
 
     return Response.json(
       {
@@ -445,29 +584,43 @@ export async function PUT(request, { params }) {
   }
 }
 
-export async function DELETE(request, { params }) {
-  const { response } = await requireRole("admin");
+/*
+|--------------------------------------------------------------------------
+| DELETE / SOFT DELETE
+|--------------------------------------------------------------------------
+*/
+export async function DELETE(
+  request,
+  { params }
+) {
+  const { response } =
+    await requireRole("admin");
 
   if (response) return response;
 
   try {
     const { id } = await params;
 
-    const [existing] = await db.execute(
-      `
-      SELECT id, name, status
-      FROM products
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [id]
-    );
+    const [existing] =
+      await db.execute(
+        `
+        SELECT
+          id,
+          name,
+          status
+        FROM products
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [id]
+      );
 
     if (existing.length === 0) {
       return Response.json(
         {
           success: false,
-          message: "Produk tidak ditemukan.",
+          message:
+            "Produk tidak ditemukan.",
         },
         { status: 404 }
       );
@@ -484,15 +637,20 @@ export async function DELETE(request, { params }) {
 
     return Response.json({
       success: true,
-      message: "Produk berhasil dinonaktifkan.",
+      message:
+        "Produk berhasil dinonaktifkan.",
     });
   } catch (error) {
-    console.error("Delete product error:", error);
+    console.error(
+      "Delete product error:",
+      error
+    );
 
     return Response.json(
       {
         success: false,
-        message: "Gagal menonaktifkan produk.",
+        message:
+          "Gagal menonaktifkan produk.",
       },
       { status: 500 }
     );
