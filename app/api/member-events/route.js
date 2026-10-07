@@ -20,7 +20,9 @@ export async function GET(request) {
     const where = [];
 
     if (current) {
-      where.push("status = 'active' AND start_date <= NOW() AND end_date >= NOW()");
+      where.push(
+        "status = 'active' AND start_date <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR) AND end_date >= DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)"
+      );
     } else if (status) {
       where.push("status = ?");
       params.push(status);

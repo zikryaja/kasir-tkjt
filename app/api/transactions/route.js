@@ -113,8 +113,8 @@ export async function POST(request) {
         SELECT id, discount_type, discount_value, minimum_purchase
         FROM member_events
         WHERE status = 'active'
-          AND start_date <= NOW()
-          AND end_date >= NOW()
+          AND start_date <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)
+          AND end_date >= DATE_ADD(UTC_TIMESTAMP(), INTERVAL 7 HOUR)
         ORDER BY start_date DESC, created_at DESC
         LIMIT 1
       `);

@@ -17,6 +17,7 @@ export default function KasirPage() {
 
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
+  const [showProductImages, setShowProductImages] = useState(true);
 
   const [cart, setCart] = useState([]);
   const [memberId, setMemberId] = useState("");
@@ -115,6 +116,73 @@ export default function KasirPage() {
   }, []);
 
   // =========================================================
+  // REFRESH MEMBER PROMO AFTER MEMBER SELECTION
+  // =========================================================
+
+  useEffect(() => {
+    if (!memberId) {
+      return;
+    }
+
+    async function loadMemberPromo() {
+      try {
+        const response = await fetch(
+          "/api/member-events?current=1",
+          {
+            cache: "no-store",
+            credentials: "include",
+          }
+        );
+
+        const json = await response.json();
+
+        console.log("Member promo response:", json);
+
+        if (!response.ok || !json.success) {
+          setPromo(null);
+          return;
+        }
+
+        const promoData = json.data;
+
+        const currentPromo = Array.isArray(promoData)
+          ? promoData[0] || null
+          : promoData || null;
+
+        if (!currentPromo) {
+          setPromo(null);
+          return;
+        }
+
+        setPromo({
+          ...currentPromo,
+          discount_value: Number(
+            currentPromo.discount_value ??
+              currentPromo.discount ??
+              currentPromo.discountValue ??
+              0
+          ),
+          minimum_purchase: Number(
+            currentPromo.minimum_purchase ??
+              currentPromo.min_purchase ??
+              currentPromo.minimumPurchase ??
+              0
+          ),
+        });
+      } catch (error) {
+        console.error(
+          "Load member promo error:",
+          error
+        );
+
+        setPromo(null);
+      }
+    }
+
+    loadMemberPromo();
+  }, [memberId]);
+
+  // =========================================================
   // CATEGORY
   // =========================================================
 
@@ -167,7 +235,9 @@ export default function KasirPage() {
     if (stock <= 0) return;
 
     setCart((current) => {
-      const existing = current.find((item) => item.id === product.id);
+      const existing = current.find(
+        (item) => item.id === product.id
+      );
 
       if (existing) {
         if (existing.quantity >= stock) {
@@ -232,7 +302,9 @@ export default function KasirPage() {
   }
 
   function removeFromCart(id) {
-    setCart((current) => current.filter((item) => item.id !== id));
+    setCart((current) =>
+      current.filter((item) => item.id !== id)
+    );
   }
 
   // =========================================================
@@ -251,7 +323,8 @@ export default function KasirPage() {
 
   const subtotal = useMemo(() => {
     return cart.reduce(
-      (total, item) => total + Number(item.price) * item.quantity,
+      (total, item) =>
+        total + Number(item.price) * item.quantity,
       0
     );
   }, [cart]);
@@ -333,29 +406,32 @@ export default function KasirPage() {
       setCheckoutLoading(true);
       setMessage("");
 
-      const response = await fetch("/api/transactions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          member_id: memberId
-            ? Number(memberId)
-            : null,
+      const response = await fetch(
+        "/api/transactions",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            member_id: memberId
+              ? Number(memberId)
+              : null,
 
-          payment_method: paymentMethod,
+            payment_method: paymentMethod,
 
-          payment_amount:
-            paymentMethod === "cash"
-              ? Number(paymentAmount || 0)
-              : total,
+            payment_amount:
+              paymentMethod === "cash"
+                ? Number(paymentAmount || 0)
+                : total,
 
-          items: cart.map((item) => ({
-            product_id: item.id,
-            quantity: item.quantity,
-          })),
-        }),
-      });
+            items: cart.map((item) => ({
+              product_id: item.id,
+              quantity: item.quantity,
+            })),
+          }),
+        }
+      );
 
       const json = await response.json();
 
@@ -379,6 +455,7 @@ export default function KasirPage() {
       }
     } catch (error) {
       console.error("Checkout error:", error);
+
       setMessage(
         error.message || "Checkout gagal."
       );
@@ -405,22 +482,26 @@ export default function KasirPage() {
     }
 
     try {
-      const response = await fetch("/api/members", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: memberForm.name.trim(),
-          phone: memberForm.phone.trim(),
-        }),
-      });
+      const response = await fetch(
+        "/api/members",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: memberForm.name.trim(),
+            phone: memberForm.phone.trim(),
+          }),
+        }
+      );
 
       const json = await response.json();
 
       if (!response.ok || !json.success) {
         throw new Error(
-          json.message || "Gagal membuat member."
+          json.message ||
+            "Gagal membuat member."
         );
       }
 
@@ -431,7 +512,9 @@ export default function KasirPage() {
         ...current,
       ]);
 
-      setMemberId(String(newMember.id));
+      setMemberId(
+        String(newMember.id)
+      );
 
       setMemberForm({
         name: "",
@@ -444,7 +527,10 @@ export default function KasirPage() {
         "Member berhasil ditambahkan."
       );
     } catch (error) {
-      console.error("Create member error:", error);
+      console.error(
+        "Create member error:",
+        error
+      );
 
       setMessage(
         error.message ||
@@ -459,6 +545,7 @@ export default function KasirPage() {
 
   return (
     <div className="min-w-0">
+
       {/* =====================================================
           HEADER
       ====================================================== */}
@@ -473,13 +560,30 @@ export default function KasirPage() {
             Kasir
           </h1>
 
-          <button
-            type="button"
-            onClick={loadData}
-            className="shrink-0 rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-ink transition hover:bg-canvas"
-          >
-            Refresh
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              aria-pressed={showProductImages}
+              onClick={() =>
+                setShowProductImages(
+                  (visible) => !visible
+                )
+              }
+              className="min-h-10 rounded-lg border border-line bg-surface px-3 py-2 text-sm font-medium text-ink transition hover:bg-canvas focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              {showProductImages
+                ? "Sembunyikan gambar"
+                : "Tampilkan gambar"}
+            </button>
+
+            <button
+              type="button"
+              onClick={loadData}
+              className="shrink-0 rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-ink transition hover:bg-canvas"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
       </div>
 
@@ -496,12 +600,14 @@ export default function KasirPage() {
       ====================================================== */}
 
       <div className="grid min-w-0 grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_350px]">
+
         {/* ===================================================
             PRODUCT SECTION
         ==================================================== */}
 
         <section className="min-w-0">
           <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+
             {/* SEARCH */}
 
             <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_180px]">
@@ -540,11 +646,11 @@ export default function KasirPage() {
             {/* PRODUCT LIST */}
 
             {loading ? (
-              <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-4">
+              <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-3">
                 {[1, 2, 3].map((item) => (
                   <div
                     key={item}
-                    className="h-72 animate-pulse rounded-xl border border-line bg-canvas"
+                    className="h-36 animate-pulse rounded-xl border border-line bg-canvas"
                   />
                 ))}
               </div>
@@ -559,7 +665,7 @@ export default function KasirPage() {
                 </p>
               </div>
             ) : (
-              <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-4">
+              <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] gap-3">
                 {filteredProducts.map(
                   (product) => {
                     const cartItem =
@@ -575,43 +681,52 @@ export default function KasirPage() {
                     return (
                       <div
                         key={product.id}
-                        className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-surface transition hover:border-primary/40 hover:shadow-sm"
+                        className={`flex min-w-0 overflow-hidden rounded-xl border border-line bg-surface transition hover:border-primary/40 hover:shadow-sm ${
+                          showProductImages
+                            ? "min-h-[132px]"
+                            : "min-h-[112px]"
+                        }`}
                       >
+
                         {/* IMAGE */}
 
-                        <div className="flex h-40 w-full items-center justify-center overflow-hidden bg-canvas">
-                          {product.photo ? (
-                            <img
-                              src={product.photo}
-                              alt={product.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <span className="text-sm text-muted">
-                              No Image
-                            </span>
-                          )}
-                        </div>
+                        {showProductImages && (
+                          <div className="flex w-16 shrink-0 items-center justify-center overflow-hidden bg-canvas">
+                            {product.photo ? (
+                              <img
+                                src={product.photo}
+                                alt={product.name}
+                                className="h-full w-full object-contain"
+                              />
+                            ) : (
+                              <span className="text-sm text-muted">
+                                No Image
+                              </span>
+                            )}
+                          </div>
+                        )}
 
                         {/* CONTENT */}
 
-                        <div className="flex flex-1 flex-col p-4">
+                        <div className="flex min-w-0 flex-1 flex-col p-2.5">
                           <div className="min-w-0">
                             <h3 className="line-clamp-2 min-h-[40px] text-sm font-semibold leading-5 text-ink">
                               {product.name}
                             </h3>
 
-                            <p className="mt-1 truncate text-xs text-muted">
-                              {product.sku || "-"}
-                            </p>
+                            <div className="mt-1 flex min-w-0 items-center justify-between gap-2 text-xs text-muted">
+                              <p className="min-w-0 truncate">
+                                {product.sku || "-"}
+                              </p>
 
-                            <p className="mt-1 text-xs text-muted">
-                              Stok {stock}
-                            </p>
+                              <p className="shrink-0">
+                                Stok {stock}
+                              </p>
+                            </div>
                           </div>
 
-                          <div className="mt-auto flex min-w-0 items-center justify-between gap-2 pt-4">
-                            <p className="min-w-0 flex-1 text-sm font-semibold leading-5 text-ink [overflow-wrap:anywhere]">
+                          <div className="mt-auto flex min-w-0 flex-col items-stretch gap-2 pt-2">
+                            <p className="min-w-0 text-sm font-semibold leading-5 text-ink [overflow-wrap:anywhere]">
                               {formatRupiah(
                                 product.price
                               )}
@@ -623,7 +738,7 @@ export default function KasirPage() {
                               onClick={() =>
                                 addToCart(product)
                               }
-                              className="shrink-0 whitespace-nowrap rounded-lg bg-primary px-2.5 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                              className="h-9 w-full shrink-0 whitespace-nowrap rounded-lg bg-primary px-3 text-xs font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
                             >
                               {cartItem
                                 ? `+${cartItem.quantity}`
@@ -646,6 +761,7 @@ export default function KasirPage() {
 
         <aside className="min-w-0">
           <div className="sticky top-5 overflow-hidden rounded-2xl border border-line bg-surface shadow-sm">
+
             {/* CART HEADER */}
 
             <div className="border-b border-line px-5 py-4">
@@ -772,6 +888,7 @@ export default function KasirPage() {
             ================================================== */}
 
             <div className="border-t border-line px-5 py-5">
+
               {/* MEMBER */}
 
               <div>
@@ -979,17 +1096,17 @@ export default function KasirPage() {
 
               {paymentMethod === "qris" && (
                 <div className="mt-4 rounded-xl border border-line bg-canvas p-4">
-                    <img
-                      src="/qris/qris-demo.png"
-                      alt="QRIS Demo"
-                      className="mx-auto w-full max-w-[280px] rounded-xl"
-                    />
+                  <img
+                    src="/qris/qris-demo.png"
+                    alt="QRIS Demo"
+                    className="mx-auto w-full max-w-[280px] rounded-xl"
+                  />
 
-                    <p className="mt-3 text-center text-xs text-muted">
-                      QRIS Demo — hanya untuk simulasi pembayaran.
-                    </p>
-                  </div>
-                )}
+                  <p className="mt-3 text-center text-xs text-muted">
+                    QRIS Demo — hanya untuk simulasi pembayaran.
+                  </p>
+                </div>
+              )}
 
               {/* CHECKOUT */}
 
