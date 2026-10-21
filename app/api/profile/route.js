@@ -1,8 +1,54 @@
+
 import db from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth/guard";
-import fs from "fs/promises";
-import path from "path";
-import crypto from "crypto";
+import cloudinary from "@/lib/cloudinary";
+
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
+const ALLOWED_TYPES = {
+  "image/jpeg": true,
+  "image/png": true,
+  "image/webp": true,
+};
+
+async function uploadProfilePhoto(file, userId) {
+  if (!file || file.size === 0) {
+    throw new Error("Foto tidak ditemukan.");
+  }
+
+  if (!ALLOWED_TYPES[file.type]) {
+    throw new Error("Format foto harus JPG, PNG, atau WebP.");
+  }
+
+  if (file.size > MAX_FILE_SIZE) {
+    throw new Error("Ukuran foto maksimal 5 MB.");
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  const result = await new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: "kasir-tkjt/profiles",
+        public_id: `user-${userId}-${Date.now()}`,
+        resource_type: "image",
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+        } else if (!result) {
+          reject(new Error("Cloudinary tidak mengembalikan hasil upload."));
+        } else {
+          resolve(result);
+        }
+      }
+    );
+
+    uploadStream.end(buffer);
+  });
+
+  return result.secure_url;
+}
 
 export async function PUT(request) {
   const user = await getCurrentUser();
@@ -31,91 +77,23 @@ export async function PUT(request) {
       );
     }
 
-    const allowedTypes = {
-      "image/jpeg": "jpg",
-      "image/png": "png",
-      "image/webp": "webp",
-    };
+    // Upload foto ke Cloudinary
+    const photoUrl = await uploadProfilePhoto(file, user.id);
 
-    if (!allowedTypes[file.type]) {
-      return Response.json(
-        {
-          success: false,
-          message: "Format foto harus JPG, PNG, atau WebP.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      return Response.json(
-        {
-          success: false,
-          message: "Ukuran foto maksimal 5 MB.",
-        },
-        { status: 400 }
-      );
-    }
-
-    const uploadDir = path.join(
-      process.cwd(),
-      "public",
-      "uploads",
-      "profiles"
-    );
-
-    await fs.mkdir(uploadDir, {
-      recursive: true,
-    });
-
-    const extension = allowedTypes[file.type];
-
-    const filename = `${user.id}-${crypto.randomUUID()}.${extension}`;
-
-    const filepath = path.join(
-      uploadDir,
-      filename
-    );
-
-    const bytes = await file.arrayBuffer();
-
-    await fs.writeFile(
-      filepath,
-      Buffer.from(bytes)
-    );
-
-    const photoUrl = `/uploads/profiles/${filename}`;
-
-    // Ambil foto lama
-    const [oldRows] = await db.execute(
-      "SELECT photo FROM users WHERE id = ? LIMIT 1",
-      [user.id]
-    );
-
-    const oldPhoto = oldRows[0]?.photo;
-
-    // Simpan foto baru
-    await db.execute(
+    // Simpan URL Cloudinary ke database
+    const [result] = await db.execute(
       "UPDATE users SET photo = ? WHERE id = ?",
       [photoUrl, user.id]
     );
 
-    // Hapus foto lama jika berasal dari folder upload kita
-    if (
-      oldPhoto &&
-      oldPhoto.startsWith("/uploads/profiles/")
-    ) {
-      const oldPath = path.join(
-        process.cwd(),
-        "public",
-        oldPhoto.replace(/^\/+/, "")
+    if (result.affectedRows === 0) {
+      return Response.json(
+        {
+          success: false,
+          message: "Data pengguna tidak ditemukan.",
+        },
+        { status: 404 }
       );
-
-      try {
-        await fs.unlink(oldPath);
-      } catch {
-        // File lama tidak ditemukan, abaikan
-      }
     }
 
     return Response.json({
@@ -132,12 +110,22 @@ export async function PUT(request) {
   } catch (error) {
     console.error("PROFILE UPDATE ERROR:", error);
 
+    const message =
+      error.message || "Gagal memperbarui foto profil.";
+
+    const isValidationError =
+      message === "Foto tidak ditemukan." ||
+      message === "Format foto harus JPG, PNG, atau WebP." ||
+      message === "Ukuran foto maksimal 5 MB.";
+
     return Response.json(
       {
         success: false,
-        message: "Gagal memperbarui foto profil.",
+        message: isValidationError
+          ? message
+          : "Gagal mengunggah foto profil. Periksa konfigurasi Cloudinary atau koneksi database.",
       },
-      { status: 500 }
+      { status: isValidationError ? 400 : 500 }
     );
   }
 }
